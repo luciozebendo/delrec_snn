@@ -31,11 +31,13 @@ def reset_states(model):
         if hasattr(m, 'reset'):
             m.reset()
             
-try:
-    _, term_width = os.popen('stty size', 'r').read().split()
-    term_width = int(term_width)
-except:
-    term_width = 80
+term_width = 80 
+if os.name != 'nt':  
+    try:
+        _, term_width = os.popen('stty size', 'r').read().split()
+        term_width = int(term_width)
+    except:
+        term_width = 80 
             
 TOTAL_BAR_LENGTH = 65.
 last_time = time.time()

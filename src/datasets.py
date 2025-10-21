@@ -28,9 +28,9 @@ def SHD_dataloaders(config):
     """Initializes DataLoaders for the Spiking Heidelberg Digits dataset."""
     seed_everything(config.seed, is_cuda=True)
   
-    train_dataset = BinnedSpikingHeidelbergDigits(config.datasets_path, config.n_bins, train=True, data_type='frame', duration=config.time_step)
-    test_dataset = BinnedSpikingHeidelbergDigits(config.datasets_path, config.n_bins, train=False, data_type='frame', duration=config.time_step)
-
+    train_dataset = SpikingHeidelbergDigits(config.datasets_path, train=True, data_type='frame', duration=config.time_step)
+    test_dataset = SpikingHeidelbergDigits(config.datasets_path, train=False, data_type='frame', duration=config.time_step)
+    
     # split into train/validation
     train_dataset, valid_dataset = random_split(train_dataset, [0.8, 0.2])
   
@@ -46,8 +46,8 @@ def SHD_dataloaders(config):
 
 class BinnedSpikingHeidelbergDigits(SpikingHeidelbergDigits):
     """Custom dataset class for SHD that applies temporal binning."""
-    def __init__(self, root: str, n_bins: int, target_transform: Optional[Callable] = None) -> None:
-        super().__init__(root)
+    def __init__(self, root: str, n_bins: int, **kwargs):
+        super().__init__(root, **kwargs)
         self.n_bins = n_bins
 
     def __getitem__(self, i: int):
@@ -55,15 +55,17 @@ class BinnedSpikingHeidelbergDigits(SpikingHeidelbergDigits):
             events = {'t': self.h5_file['spikes']['times'][i], 'x': self.h5_file['spikes']['units'][i]}
             label = self.h5_file['labels'][i]
             return events, label
-
+        
         elif self.data_type == 'frame':
             frames = np.load(self.frames_path[i], allow_pickle=True)['frames'].astype(np.float32)
             label = self.frames_label[i]
-            binned_len = frames.shape[1] // self.n_bins
-            binned_frames = np.zeros((frames.shape[0], binned_len))
             
-            for i in range(binned_len):
-                binned_frames[:, i] = frames[:, self.n_bins*i : self.n_bins*(i+1)].sum(axis=1)
+            binned_len = frames.shape[1] // self.n_bins
+            binned_frames = np.zeros((binned_len, frames.shape[0])) 
+
+            for j in range(binned_len): # Use 'j' to avoid confusion with 'i'
+                binned_frames[j, :] = frames[:, self.n_bins*j : self.n_bins*(j+1)].sum(axis=1)
+            
             return binned_frames, label
 
 class SHDTripleAugDataset(Dataset):
