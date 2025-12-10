@@ -18,7 +18,7 @@ class SNNTorchAxonalRecDel(nn.Module):
         self.beta = config.beta
         self.threshold = config.v_threshold
         self.spike_grad = config.surrogate_function_snntorch
-        
+        self.detach_reset = config.detach_reset
         self.reset_mechanism = config.reset_mechanism_snntorch
         
         print(f"Initialized custom LIF with beta={self.beta}, threshold={self.threshold}, reset={self.reset_mechanism}")
@@ -70,20 +70,18 @@ class SNNTorchAxonalRecDel(nn.Module):
         pass
 
     def lif_step(self, cur, mem):
-        """
-        Manual implementation of LIF neuron step.
-        This replicates what snntorch.LIF does internally.
-        """
-        mem = self.beta * mem + cur
+        # Reconstruct tau from beta
+        tau = 1.0 / (1.0 - self.beta + 1e-8)
         
-        # spike generation with surrogate gradient
+        # Match SpikingJelly dynamics exactly
+        mem = self.beta * mem + (1.0 / tau) * cur
         spk = self.spike_grad(mem - self.threshold)
         
         if self.reset_mechanism == 'subtract':
-            mem = mem - spk * self.threshold # soft Reset
+            mem = mem - spk * self.threshold
         else:
-            mem = mem * (1.0 - spk) # hard Reset to zero
-        
+            reset_spike = spk.detach() if self.detach_reset else spk
+            mem = mem * (1.0 - reset_spike)
         return spk, mem
 
     def forward(self, x_seq: torch.Tensor):
@@ -166,6 +164,7 @@ class ConvSNNTorchAxonalRecDel(nn.Module):
         self.threshold = config.v_threshold
         self.spike_grad = config.surrogate_function_snntorch
         self.reset_mechanism = config.reset_mechanism_snntorch
+        self.detach_reset = config.detach_reset
         
         # --- CONVOLUTIONAL PARAMS ---
         # We assume input is (Batch, 1, Neurons) for the conv operation
@@ -213,13 +212,18 @@ class ConvSNNTorchAxonalRecDel(nn.Module):
             self.recurrent_delays.clamp_(min=0)
 
     def lif_step(self, cur, mem):
-        # Identical LIF logic
-        mem = self.beta * mem + cur 
+        # Reconstruct tau from beta
+        tau = 1.0 / (1.0 - self.beta + 1e-8)
+        
+        # Match SpikingJelly dynamics exactly
+        mem = self.beta * mem + (1.0 / tau) * cur
         spk = self.spike_grad(mem - self.threshold)
+        
         if self.reset_mechanism == 'subtract':
             mem = mem - spk * self.threshold
         else:
-            mem = mem * (1.0 - spk)
+            reset_spike = spk.detach() if self.detach_reset else spk
+            mem = mem * (1.0 - reset_spike)
         return spk, mem
 
     def forward(self, x_seq: torch.Tensor):
@@ -227,7 +231,6 @@ class ConvSNNTorchAxonalRecDel(nn.Module):
         T, B, N = x_seq.shape
         y_seq = []
 
-        # --- DIFFERENCE 1: No weight matrix, just delays ---
         d = self.recurrent_delays.to(device=device, dtype=dtype)
 
         if self.use_sig_p:
@@ -256,7 +259,6 @@ class ConvSNNTorchAxonalRecDel(nn.Module):
             
             y, mem = self.lif_step(cur_in, mem)
             
-            # --- DIFFERENCE 2: Convolutional Recurrence ---
             # y_masked shape: (B, N, L) -> This represents (Batch, Spatial, Delay_Taps)
             y_masked = y.unsqueeze(2) * mask
             

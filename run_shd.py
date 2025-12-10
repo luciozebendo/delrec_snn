@@ -82,7 +82,7 @@ if __name__ == "__main__":
                     
             train_acc, train_loss = train(train_loader, model, optimizer, epoch, device, config)
             val_acc, val_loss = test(valid_loader, model, epoch, device, config)
-
+            
             for sc in scheduler: sc.step()
             
             new_train_col = pd.DataFrame({str(epoch): [train_acc, train_loss]})

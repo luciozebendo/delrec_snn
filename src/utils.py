@@ -3,6 +3,7 @@ import numpy as np
 import random
 import os
 import sys
+import math
 import time
 from prettytable import PrettyTable
 
@@ -155,19 +156,31 @@ def count_parameters(model):
     print(f"Total Trainable Params: {total_params}")
     return total_params
 
-def calc_loss_SHD(output, y):
-    # (T, B, N)
+def calc_loss_SHD(output, y, mask=None):
+    # output: (T, B, N)
+    # mask: (T, B, 1) -> 1.0 for valid data, 0.0 for padding
+    
     softmax_fn = torch.nn.Softmax(dim=2)
-    m = torch.sum(softmax_fn(output), 0)
+    probs = softmax_fn(output)
+    
+    if mask is not None:
+        probs = probs * mask  # Zero out the probabilities in padded regions
+        
+    m = torch.sum(probs, 0) # Sum only valid probabilities
+    
     CEloss = torch.nn.CrossEntropyLoss()
     loss = CEloss(m, y)
     return loss
 
-def calc_metric_SHD(output, y):
-    # (T, B, N)
-    # mean accuracy over batch
+def calc_metric_SHD(output, y, mask=None):
+    # output: (T, B, N)
     softmax_fn = torch.nn.Softmax(dim=2)
-    m = torch.sum(softmax_fn(output), 0)
+    probs = softmax_fn(output)
+    
+    if mask is not None:
+        probs = probs * mask
+        
+    m = torch.sum(probs, 0)
     return np.mean((torch.max(y,1)[1]==torch.max(m,1)[1]).detach().cpu().numpy())
 
 def calc_loss_SSC(output, y):
@@ -182,3 +195,29 @@ def calc_metric_SSC(output, y):
     m = torch.sum(output, 0) # (B, N)
     _, predicted = m.max(1) # (B,)
     return predicted.eq(y).sum().item()
+
+class ArctanSurrogate:
+    """
+    A callable class that wraps the Arctan autograd function.
+    This mimics how snntorch surrogates work (e.g. FastSigmoid).
+    """
+    def __init__(self, alpha=2.0):
+        self.alpha = alpha
+
+    def __call__(self, input):
+        return Arctan.apply(input, self.alpha)
+    
+class Arctan(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, alpha=2.0):
+        ctx.save_for_backward(input)
+        ctx.alpha = alpha
+        return (input > 0).float()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        (input,) = ctx.saved_tensors
+        alpha = ctx.alpha
+        # Match SpikingJelly's ATan exactly
+        grad_input = grad_output * (alpha / 2.0) / (1.0 + (math.pi / 2.0 * alpha * input).pow(2))
+        return grad_input, None

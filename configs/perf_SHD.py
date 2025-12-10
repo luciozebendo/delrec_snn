@@ -1,8 +1,7 @@
 import snntorch as SNNTORCH_LIB
 from snntorch import surrogate as SNNTORCH_SURROGATE
-
 from spikingjelly.activation_based import neuron, surrogate
-from src.utils import Triangle
+from src.utils import Triangle, Arctan, ArctanSurrogate
 
 class Config():
     
@@ -17,7 +16,7 @@ class Config():
     ### General ###
     
     epochs = 150
-    batch_size = 256
+    batch_size = 32
     
     bias = True
     use_batch_norm = True
@@ -25,10 +24,10 @@ class Config():
     results_dir = ''
     
     ### Model architechture ###
-    
+    #add one more layer here
     hidden_layers = [256, 256] 
     
-    input_size = 700
+    input_size = 700 // n_bins
     output_size = 20
     
     recurrent_dropout_rate = 0.2 
@@ -49,12 +48,14 @@ class Config():
     
     # --- snnTorch Config ---
     neuron_module_snntorch = SNNTORCH_LIB.LIF
-    beta = 0.38583  # exp(-1/tau)
-    surrogate_function_snntorch = Triangle.apply
+    beta = 1.0 - (1.0 / tau) 
+    # surrogate_function_snntorch = Triangle.apply
+    surrogate_function_snntorch = ArctanSurrogate(alpha=5.0)
+    # surrogate_function_snntorch = Arctan.apply
     reset_mechanism_snntorch = 'zero' 
     
     # --- Common ---
-    detach_reset = False # False
+    detach_reset = False 
     decay_input=False
     step_mode = 'm'
     store_v_seq = True

@@ -4,7 +4,7 @@ import h5py
 import os
 
 from torchvision import datasets, transforms
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import DataLoader, Dataset, random_split 
 from torch.distributions.binomial import Binomial
 from typing import Callable, Optional
 
@@ -27,10 +27,8 @@ def load_dataset(config):
 def SHD_dataloaders(config):
     """Initializes DataLoaders for the Spiking Heidelberg Digits dataset."""
     seed_everything(config.seed, is_cuda=True)
-  
-    train_dataset = SpikingHeidelbergDigits(config.datasets_path, train=True, data_type='frame', duration=config.time_step)
-    test_dataset = SpikingHeidelbergDigits(config.datasets_path, train=False, data_type='frame', duration=config.time_step)
-    
+    train_dataset = PreprocessedSHD(config.datasets_path, train=True)
+    test_dataset = PreprocessedSHD(config.datasets_path, train=False)
     # split into train/validation
     train_dataset, valid_dataset = random_split(train_dataset, [0.8, 0.2])
   
@@ -39,34 +37,56 @@ def SHD_dataloaders(config):
 
     # pad_sequence_collate is used to handle variable length sequences
     train_loader = DataLoader(train_dataset, collate_fn=pad_sequence_collate, batch_size=config.batch_size, shuffle=True, num_workers=4)
-    valid_loader = DataLoader(valid_dataset, collate_fn=pad_sequence_collate, batch_size=config.batch_size)
+    valid_loader = DataLoader(valid_dataset, collate_fn=pad_sequence_collate, batch_size=config.batch_size, num_workers=0)
     test_loader = DataLoader(test_dataset, collate_fn=pad_sequence_collate, batch_size=config.batch_size, num_workers=4)
 
     return train_loader, valid_loader, test_loader
 
 class BinnedSpikingHeidelbergDigits(SpikingHeidelbergDigits):
-    """Custom dataset class for SHD that applies temporal binning."""
-    def __init__(self, root: str, n_bins: int, **kwargs):
+    """Custom dataset class for SHD that applies spatial binning."""
+    def __init__(self, root: str, n_bins: int, duration_ms: float = 5.0, **kwargs):
+        # Force data_type='event' to get raw spike data
+        kwargs['data_type'] = 'event'
         super().__init__(root, **kwargs)
         self.n_bins = n_bins
-
-    def __getitem__(self, i: int):
-        if self.data_type == 'event':
-            events = {'t': self.h5_file['spikes']['times'][i], 'x': self.h5_file['spikes']['units'][i]}
-            label = self.h5_file['labels'][i]
-            return events, label
+        self.duration_ms = duration_ms  # Temporal bin width in milliseconds
         
-        elif self.data_type == 'frame':
-            frames = np.load(self.frames_path[i], allow_pickle=True)['frames'].astype(np.float32)
-            label = self.frames_label[i]
+    def __getitem__(self, i: int):
+        # Get raw event data
+        events = {'t': self.h5_file['spikes']['times'][i], 
+                  'x': self.h5_file['spikes']['units'][i]}
+        label = self.h5_file['labels'][i]
+        
+        # Get spike times (in seconds) and neuron indices
+        spike_times = np.array(events['t'])  # in seconds
+        spike_neurons = np.array(events['x'])  # neuron indices 0-699
+        
+        # Determine time range
+        if len(spike_times) > 0:
+            t_max = spike_times.max()
+        else:
+            t_max = 1.0  # default 1 second
             
-            binned_len = frames.shape[1] // self.n_bins
-            binned_frames = np.zeros((binned_len, frames.shape[0])) 
-
-            for j in range(binned_len): # Use 'j' to avoid confusion with 'i'
-                binned_frames[j, :] = frames[:, self.n_bins*j : self.n_bins*(j+1)].sum(axis=1)
-            
-            return binned_frames, label
+        # Create time bins (convert to milliseconds)
+        n_time_bins = int(np.ceil(t_max * 1000 / self.duration_ms))
+        
+        # Create frame representation
+        frames = np.zeros((n_time_bins, 700), dtype=np.float32)
+        
+        # Fill in spikes
+        for t, n in zip(spike_times, spike_neurons):
+            time_bin = int(t * 1000 / self.duration_ms)  # Convert to ms and bin
+            if time_bin < n_time_bins and n < 700:
+                frames[time_bin, int(n)] += 1
+        
+        # Spatial binning: 700 -> 140 neurons
+        N_binned = 700 // self.n_bins
+        binned_frames = np.zeros((n_time_bins, N_binned), dtype=np.float32)
+        
+        for j in range(N_binned):
+            binned_frames[:, j] = frames[:, self.n_bins*j : self.n_bins*(j+1)].sum(axis=1)
+        
+        return binned_frames, label
 
 class SHDTripleAugDataset(Dataset):
     """Dataset wrapper that triples data with jitter, thinning, and blending augmentations."""
@@ -95,6 +115,10 @@ class SHDTripleAugDataset(Dataset):
 
     @staticmethod
     def _time_shift_per_neuron(x: torch.Tensor, shift_max: int) -> torch.Tensor:
+        """
+        Applies a different time shift to each neuron independently.
+        x shape: (Time, Neurons)
+        """
         if shift_max <= 0:
             return x
         T, N = x.shape
@@ -299,3 +323,24 @@ def PS_MNIST_dataloaders(config):
     test_loader = DataLoader(datasets.MNIST(config.datasets_path, train=False, transform=transforms.ToTensor()), batch_size=config.batch_size, shuffle=False, **kwargs)
 
     return train_loader, val_loader, test_loader
+
+class PreprocessedSHD(Dataset):
+    """Dataset that loads preprocessed SHD .npz files."""
+    def __init__(self, root: str, train: bool = True):
+        super().__init__()
+        self.split = 'train' if train else 'test'
+        self.data_dir = os.path.join(root, f'preprocessed_{self.split}')
+        
+        # Get all .npz files
+        self.files = sorted([f for f in os.listdir(self.data_dir) if f.endswith('.npz')])
+        print(f"Loaded {len(self.files)} preprocessed {self.split} samples from {self.data_dir}")
+    
+    def __len__(self):
+        return len(self.files)
+    
+    def __getitem__(self, idx):
+        # Load preprocessed file
+        data = np.load(os.path.join(self.data_dir, self.files[idx]))
+        frames = data['frames'].astype(np.float32)  # (T, 140)
+        label = int(data['label'])
+        return frames, label

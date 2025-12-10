@@ -36,12 +36,12 @@ def train(train_loader, model, optimizer, epoch, device, config, penalize_spikes
 
     model.train()
     for batch_idx, (inputs, targets, _) in enumerate(train_loader):
-        
+
         targets = F.one_hot(targets, config.output_size).float()
         
         inputs = inputs.permute(1, 0, 2).float().to(device)  #(time, batch, neurons)
         targets = targets.to(device)
-        
+
         reset_states(model=model)
 
         outputs = model(inputs)
@@ -93,12 +93,12 @@ def test(test_loader, model, epoch, device, config, penalize_spikes=False):
         
     with torch.no_grad():
         for batch_idx, (inputs, targets, _) in enumerate(test_loader):
-            
+
             targets = F.one_hot(targets, config.output_size).float()
             
             inputs = inputs.permute(1, 0, 2).float().to(device)  #(time, batch, neurons)
             targets = targets.to(device)
-            
+
             reset_states(model=model)
             
             outputs = model(inputs)
