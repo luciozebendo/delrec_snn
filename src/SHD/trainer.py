@@ -5,6 +5,7 @@ import wandb
 from src.recurrent_neurons import SNNTorchAxonalRecDel, ConvSNNTorchAxonalRecDel
 from src.SHD.snn import dcls_module, modified_batchnorm
 from src.utils import *
+from src.gated_neurons import LightGRU
 
 def get_spike_cost(model, normalize="NT"):
     costs = []
@@ -158,6 +159,13 @@ def init_optim_sche(model, config):
             weights_norm.append(m.bn.weight)
             if config.bias:
                 weights_norm.append(m.bn.bias)
+
+        elif isinstance(m, LightGRU):
+            # Add gated LIF parameters to weight optimizer
+            weights.append(m.Wz.weight)
+            weights.append(m.Uz.weight)
+            weights.append(m.Wh.weight)
+            weights.append(m.Uh.weight)
 
     optimizer = []
     scheduler = []

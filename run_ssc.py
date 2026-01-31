@@ -18,7 +18,7 @@ os.environ["WANDB_MODE"] = "disabled" # run W&B in offline mode
 WANDB_KEY = None # add the key to log online
 
 if __name__ == "__main__":
-    seed = [0, 100, 200]
+    seed = [200]
     test_accuracies = []
 
     for current_seed in seed:
@@ -27,17 +27,16 @@ if __name__ == "__main__":
         config.seed = current_seed 
         seed_everything(seed=config.seed, is_cuda=True)
 
-        # if torch.cuda.is_available():
-        #     device = torch.device("cuda")
-        #     print(f"Using CUDA GPU: {torch.cuda.get_device_name(0)}")
-        # elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        #     device = torch.device("mps")
-        #     torch.set_default_dtype(torch.float32)
-        #     print("Using Apple Silicon GPU (MPS)")
-        # else:
-
-        device = torch.device("cpu")
-        print("Using CPU")
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+            print(f"Using CUDA GPU: {torch.cuda.get_device_name(0)}")
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device = torch.device("mps")
+            torch.set_default_dtype(torch.float32)
+            print("Using Apple Silicon GPU (MPS)")
+        else:
+            device = torch.device("cpu")
+            print("Using CPU")
             
         # load the dataset and initialize the chosen SNN model, optimizer, and scheduler
         train_loader, valid_loader, test_loader = load_dataset(config)

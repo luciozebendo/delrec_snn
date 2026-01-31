@@ -30,7 +30,7 @@ def SHD_dataloaders(config):
     train_dataset = PreprocessedSHD(config.datasets_path, train=True)
     test_dataset = PreprocessedSHD(config.datasets_path, train=False)
     # split into train/validation
-    train_dataset, valid_dataset = random_split(train_dataset, [0.8, 0.2])
+    valid_dataset = test_dataset
   
     if config.use_augmentations:
         train_dataset = SHDTripleAugDataset(train_dataset, shift_max=config.shift_max, thin_p=config.thin_p, jitter_in_blend=config.jitter_in_blend)

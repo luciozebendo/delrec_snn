@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 import json
 import os
+import argparse
 
 from configs.perf_SHD import Config
 from src.SHD.trainer import *
@@ -15,11 +16,21 @@ from src.datasets import load_dataset
 from src.recurrent_neurons import SNNTorchAxonalRecDel, ConvSNNTorchAxonalRecDel, axonal_recdel
 
 os.environ["WANDB_MODE"] = "disabled" # run W&B in offline mode
-WANDB_KEY = None # Your key here
+WANDB_KEY = None # add the key to log online
 
 if __name__ == "__main__":
     
-    seed_list = [0, 1, 2, 4, 5, 6, 7, 8, 9]  
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--seed', type=int, default=None, help='Seed to run (if None, runs all seeds sequentially)')
+    args = parser.parse_args()
+    
+    # If seed provided via command line, use only that seed
+    if args.seed is not None:
+        seed_list = [args.seed]
+    else:
+        # Otherwise run all seeds
+        seed_list = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
     test_accuracies = []
     
     for run_seed in seed_list:
@@ -74,6 +85,10 @@ if __name__ == "__main__":
         val_res = pd.DataFrame()
         best_val_acc = 0.0
 
+        patience_counter = 0
+        patience = getattr(config, 'patience', 30)
+        min_epochs = getattr(config, 'min_epochs', 50)
+
         for epoch in range(config.epochs):
             # If update sigma at each epoch :
             for m in model.layers:
@@ -119,6 +134,9 @@ if __name__ == "__main__":
             if val_acc >= best_val_acc:
                 torch.save(state, os.path.join(config.results_dir, 'best.pth'))
                 best_val_acc = val_acc
+                patience_counter = 0 
+            else:
+                patience_counter += 1
 
             print(
                 'Val Epoch: [{}/{}], lr: {:.6f}, lr_pos: {:.6f}, acc: {:.4f}, best: {:.4f}'
@@ -131,6 +149,10 @@ if __name__ == "__main__":
                     best_val_acc
                 )
             )
+            
+            if patience_counter >= patience and epoch >= min_epochs:
+                print(f"\nEarly stopping at epoch {epoch}! No improvement for {patience} epochs.")
+                break
             
         ### testing the best model ###
         best_ckpt = torch.load(os.path.join(config.results_dir, 'best.pth'), weights_only=False)

@@ -167,13 +167,15 @@ class ConvSNNTorchAxonalRecDel(nn.Module):
         self.detach_reset = config.detach_reset
         
         # --- CONVOLUTIONAL PARAMS ---
-        # We assume input is (Batch, 1, Neurons) for the conv operation
         self.kernel_size = config.rec_kernel_size
-        self.padding = (self.kernel_size - 1) // 2 # Same padding to keep size constant
-        
-        # Replaces (neurons, neurons) with (1, 1, kernel_size)
-        # We use groups=1, in_channels=1, out_channels=1 to convolve over the feature vector
-        self.recurrent_kernel = nn.Parameter(torch.randn(1, 1, self.kernel_size), requires_grad=True)
+        # For conv2d: pad along N dimension only, not L dimension
+        self.padding = (self.kernel_size // 2, 0)  # ← CHANGED: (pad_height, pad_width)
+
+        # 2D kernel: convolve along N (neurons), leave L (delays) unchanged
+        # Shape: (out_channels=1, in_channels=1, height=kernel_size, width=1)
+        self.recurrent_kernel = nn.Parameter(
+            torch.randn(1, 1, self.kernel_size, 1), requires_grad=True
+        )  # Added 4th dimension
         
         self.recurrent_delays = nn.Parameter(torch.zeros(neurons), requires_grad=True)
 
@@ -259,22 +261,20 @@ class ConvSNNTorchAxonalRecDel(nn.Module):
             
             y, mem = self.lif_step(cur_in, mem)
             
-            # y_masked shape: (B, N, L) -> This represents (Batch, Spatial, Delay_Taps)
+            # y_masked shape: (B, N, L)
             y_masked = y.unsqueeze(2) * mask
-            
-            # We need to convolve over the Spatial dimension (N) for every Delay Tap (L).
-            # To do this efficiently, we stack Batch and Delay Tap dimensions.
-            # Reshape: (B, N, L) -> (B, L, N) -> (B*L, 1, N)
-            # B*L acts as the "Batch" for conv1d, 1 is input channel, N is signal length.
-            conv_input = y_masked.permute(0, 2, 1).reshape(B * L, 1, N)
-            
-            # Apply 1D Convolution
-            # Output: (B*L, 1, N)
-            X_rec_flat = F.conv1d(conv_input, self.recurrent_kernel, padding=self.padding)
-            
-            # Reshape back to (B, N, L)
-            # (B*L, 1, N) -> (B, L, N) -> (B, N, L)
-            X_rec = X_rec_flat.reshape(B, L, N).permute(0, 2, 1)
+
+            # Add channel dimension for conv2d: (B, N, L) -> (B, 1, N, L)
+            y_masked_2d = y_masked.unsqueeze(1)
+
+            # Apply 2D convolution (convolves along N only, kernel width=1 for L)
+            # Input: (B, 1, N, L)
+            # Kernel: (1, 1, kernel_size, 1)
+            # Output: (B, 1, N, L)
+            X_rec_2d = F.conv2d(y_masked_2d, self.recurrent_kernel, padding=self.padding)
+
+            # Remove channel dimension: (B, 1, N, L) -> (B, N, L)
+            X_rec = X_rec_2d.squeeze(1)
 
             buffer[:, :, pointer] = 0.0
             pointer = (pointer + 1) % L

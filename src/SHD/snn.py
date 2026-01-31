@@ -8,6 +8,7 @@ from DCLS.construct.modules import Dcls1d
 import torch.nn as nn
 
 from src.recurrent_neurons import SNNTorchAxonalRecDel, ConvSNNTorchAxonalRecDel, axonal_recdel
+from src.gated_neurons import LightGRU
 
 class dcls_module(Dcls1d):
     def __init__(
@@ -166,18 +167,27 @@ class SNN_recurrent_delays(SNN):
                 layers.append(modified_batchnorm(layer_dim, step_mode='m'))
             
             if config.no_delay_in_first_layer and idx == 0:
-                layers.append(config.neuron_module(
-                tau = config.tau,
-                decay_input = config.decay_input,
-                v_reset = config.v_reset,
-                v_threshold = config.v_threshold,
-                surrogate_function = config.surrogate_function,
-                detach_reset = config.detach_reset,
-                step_mode = config.step_mode,
-                backend = config.backend,
-                store_v_seq = config.store_v_seq,
-                )
-                              )
+                if hasattr(config, 'use_light_gru') and config.use_light_gru:
+                    layers.append(LightGRU(
+                        num_neurons=layer_dim,
+                        tau=config.tau,
+                        v_threshold=config.v_threshold,
+                        v_reset=config.v_reset,
+                        surrogate_function=config.surrogate_function_snntorch
+                    ))
+                else:
+                    # Standard LIF
+                    layers.append(config.neuron_module(
+                        tau = config.tau,
+                        decay_input = config.decay_input,
+                        v_reset = config.v_reset,
+                        v_threshold = config.v_threshold,
+                        surrogate_function = config.surrogate_function,
+                        detach_reset = config.detach_reset,
+                        step_mode = config.step_mode,
+                        backend = config.backend,
+                        store_v_seq = config.store_v_seq,
+                    ))
             else:
                 layers.append(ConvSNNTorchAxonalRecDel(config, layer_dim))
                 
@@ -187,19 +197,28 @@ class SNN_recurrent_delays(SNN):
                 
         layers.append(torch.nn.Linear(dim_buffer, config.output_size, bias=config.bias))
 
-        layers.append(
-            config.neuron_module(
-            tau = config.tau,
-            decay_input = config.decay_input,
-            v_reset = config.v_reset,
-            v_threshold = 1e8,
-            surrogate_function = config.surrogate_function,
-            detach_reset = config.detach_reset,
-            step_mode = config.step_mode,
-            backend = config.backend,
-            store_v_seq = config.store_v_seq,
+        if hasattr(config, 'use_light_gru') and config.use_light_gru:
+            layers.append(LightGRU(
+                num_neurons=config.output_size,
+                tau=config.tau,
+                v_threshold=1e8,
+                v_reset=config.v_reset,
+                surrogate_function=config.surrogate_function_snntorch
+            ))
+        else:
+            layers.append(
+                config.neuron_module(
+                tau = config.tau,
+                decay_input = config.decay_input,
+                v_reset = config.v_reset,
+                v_threshold = 1e8,
+                surrogate_function = config.surrogate_function,
+                detach_reset = config.detach_reset,
+                step_mode = config.step_mode,
+                backend = config.backend,
+                store_v_seq = config.store_v_seq,
+                )
             )
-        )
     
         self.layers = torch.nn.Sequential(*layers)
         
