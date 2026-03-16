@@ -24,7 +24,7 @@ class Config():
     recurrent_dropout_rate = 0.23495685940955754
     feedforward_dropout_rate = 0.4376747992061383
     no_delay_in_first_layer = True
-    no_delay_in_last_layer = True
+    # no_delay_in_last_layer = True
     init_ff_weights = 'kaiming'
     ### Spiking neuron configuration ###
     neuron_module = neuron.LIFNode
